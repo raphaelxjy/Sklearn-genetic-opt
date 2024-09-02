@@ -207,6 +207,8 @@ class GASearchCV(BaseSearchCV):
         error_score=np.nan,
         return_train_score=False,
         log_config=None,
+        n_jobs_ind_parallel=-1,
+        the_higher_metric_score_the_better=True
     ):
 
         self.estimator = clone(estimator)
@@ -251,6 +253,8 @@ class GASearchCV(BaseSearchCV):
         self.refit_time_ = None
         self.multimetric_ = False
         self.log_config = log_config
+        self.n_jobs_ind_parallel=n_jobs_ind_parallel
+        self.the_higher_metric_score_the_better= the_higher_metric_score_the_better
 
         # Check that the estimator is compatible with scikit-learn
         if not is_classifier(self.estimator) and not is_regressor(self.estimator):
@@ -294,8 +298,10 @@ class GASearchCV(BaseSearchCV):
         and create other objects to hold the hof, logbook and stats.
         """
 
-        self.creator.create("FitnessMax", base.Fitness, weights=[self.criteria_sign])
-        self.creator.create("Individual", list, fitness=creator.FitnessMax)
+        if not hasattr(creator, "FitnessMax"):
+            self.creator.create("FitnessMax", base.Fitness, weights=[self.criteria_sign])
+        if not hasattr(creator, "Individual"):
+            self.creator.create("Individual", list, fitness=creator.FitnessMax)
 
         attributes = []
         # Assign all the parameters defined in the param_grid
@@ -337,6 +343,8 @@ class GASearchCV(BaseSearchCV):
             self.toolbox.register("select", tools.selRoulette)
 
         self.toolbox.register("evaluate", self.evaluate)
+
+        self.toolbox.register("log_results", self.aggregate_and_log_results) #M New function registered to log results into logbook obtained from evaluation
 
         self._pop = self.toolbox.population(n=self.population_size)
         self._hof = tools.HallOfFame(self.keep_top_k)
@@ -434,7 +442,7 @@ class GASearchCV(BaseSearchCV):
         # Log the hyperparameters and the cv-score
         self.logbook.record(parameters=current_generation_params)
 
-        return [score]
+        return [score], current_generation_params #M Added current_generation_params to return so that best hyperparameters for each generation can be printed out.
 
     @if_delegate_has_method(delegate="estimator")
     def fit(self, X, y, callbacks=None):
