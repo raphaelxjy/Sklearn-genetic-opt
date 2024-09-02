@@ -1,7 +1,7 @@
 import numpy as np
 from deap import tools
 from deap.algorithms import varAnd, varOr
-
+import multiprocessing
 from .callbacks.validations import eval_callbacks
 
 
@@ -371,6 +371,8 @@ def eaMuCommaLambda(
     cxpb,
     mutpb,
     ngen,
+    n_jobs_ind_parallel,
+    the_higher_metric_score_the_better,
     stats=None,
     halloffame=None,
     callbacks=None,
@@ -445,7 +447,25 @@ def eaMuCommaLambda(
 
     # Evaluate the individuals with an invalid fitness
     invalid_ind = [ind for ind in population if not ind.fitness.valid]
-    fitnesses = toolbox.map(toolbox.evaluate, invalid_ind)
+
+    # Sequential Implementation
+
+    #fitnesses = toolbox.map(toolbox.evaluate, invalid_ind)
+
+    # Parallel Implementation
+
+    pool = multiprocessing.Pool(processes=n_jobs_ind_parallel)
+    results = pool.map(toolbox.evaluate, invalid_ind)
+    pool.close()
+    pool.join()
+
+    fitnesses = [result[0] for result in results]
+
+    for _, current_generation_params in results:
+        toolbox.log_results(current_generation_params)
+
+    # End of Parallel Implementation
+
     for ind, fit in zip(invalid_ind, fitnesses):
         ind.fitness.values = fit
 
@@ -464,6 +484,14 @@ def eaMuCommaLambda(
 
     if verbose:
         print(logbook.stream)
+
+    # Additional Descriptor Function Calls
+
+    compare_with_best_up_to_date(results, the_higher_metric_score_the_better)#M function to compare with best hyperparameters up to date
+    
+    print_best_hyperparameters(results) #M function to print out best hyperparameters for each generation. 
+
+    # End of Additional Descriptor Function Calls
 
     callbacks_step_args = {
         "callbacks": callbacks,
@@ -494,7 +522,29 @@ def eaMuCommaLambda(
 
         # Evaluate the individuals with an invalid fitness
         invalid_ind = [ind for ind in offspring if not ind.fitness.valid]
-        fitnesses = toolbox.map(toolbox.evaluate, invalid_ind)
+
+        # Sequential Implementation
+
+        #fitnesses = toolbox.map(toolbox.evaluate, invalid_ind)
+
+        # Parallel Implementation
+
+        pool = multiprocessing.Pool(processes=n_jobs_ind_parallel)
+        results = pool.map(toolbox.evaluate, invalid_ind) #M Results is list of tuples,i.e, ([score], current_generation_params) from toolbox.evaluate
+        pool.close()
+        pool.join()
+
+        fitnesses = [result[0] for result in results]
+
+        #M Collate cv-scores of all individuals
+        fitnesses = [result[0] for result in results]
+        
+        #M Record the results into the logbook sequentially
+        for _, current_generation_params in results:
+            toolbox.log_results(current_generation_params)
+
+        # End of Parallel Implementation
+
         for ind, fit in zip(invalid_ind, fitnesses):
             ind.fitness.values = fit
 
@@ -514,6 +564,14 @@ def eaMuCommaLambda(
 
         if verbose:
             print(logbook.stream)
+
+        # Additional Descriptor Function Calls
+
+        compare_with_best_up_to_date(results, the_higher_metric_score_the_better)#M function to compare with best hyperparameters up to date
+
+        print_best_hyperparameters(results) #M function to print out best hyperparameters for each generation.
+
+        # End of Additional Descriptor Function Calls
 
         callbacks_step_args = {
             "callbacks": callbacks,
@@ -541,3 +599,89 @@ def eaMuCommaLambda(
     eval_callbacks(**callbacks_end_args)
 
     return population, logbook, n_gen
+
+def compare_with_best_up_to_date(results,the_higher_metric_score_the_better):
+    '''
+    This method compares the best hyperparameters for each generation with the best hyperparameters obtained from previous generations
+    '''
+    global best_hyperparameters_up_to_date
+    global best_fitness_score_up_to_date
+    
+    #M Unpack results
+    scores, hyperparameters_profile_list = zip(*results)
+
+    #M Find the index of the best score
+    best_index = np.argmax(scores)
+    best_score = scores[best_index]
+    best_hyperparameters_profile = hyperparameters_profile_list[best_index]
+    
+    if not best_hyperparameters_up_to_date: #M if dictionary is empty(aka after evaluation of first generation)
+
+        hyperparameters = extractHyperparametersfromBestProfile(best_hyperparameters_profile)
+        
+        #M Update up_to_date scores and hyperparameters
+        best_fitness_score_up_to_date = best_score
+        best_hyperparameters_up_to_date = hyperparameters
+        
+    else:
+        if the_higher_metric_score_the_better:
+            
+            if best_score > best_fitness_score_up_to_date:
+                
+                hyperparameters = extractHyperparametersfromBestProfile(best_hyperparameters_profile)
+                
+                #M Update up_to_date scores and hyperparameters
+                best_fitness_score_up_to_date = best_score
+                best_hyperparameters_up_to_date = hyperparameters
+            
+        else:
+            if best_score < best_fitness_score_up_to_date:
+            
+                hyperparameters = extractHyperparametersfromBestProfile(best_hyperparameters_profile)
+            
+                #M Update up_to_date scores and hyperparameters
+                best_fitness_score_up_to_date = best_score
+                best_hyperparameters_up_to_date = hyperparameters
+            
+
+def extractHyperparametersfromBestProfile(best_hyperparameters_profile):
+    
+        #M Extract only hyperparameter entries from the dictionary
+        substring = 'modelForRxn'
+        hyperparameter_keys = [key for key in best_hyperparameters_profile if substring in key]
+        #hyperparameter_keys = [key for key in best_parameters if key.startswith('hybrid__modelForRxn')]
+        hyperparameters = {key: best_hyperparameters_profile[key] for key in hyperparameter_keys}
+        
+        return hyperparameters
+    
+def print_best_hyperparameters(results):
+    '''
+    This method takes in the cv results of all individuals and prints the hyperparameter of the individual with the highest score
+    '''
+     #M Unpack results
+    scores, parameters_list = zip(*results)
+
+    #M Find the index of the best score
+    best_index = np.argmax(scores)
+    best_score = scores[best_index]
+    best_parameters = parameters_list[best_index]
+    
+    #M Extract only hyperparameter entries from the dictionary
+    hyperparameter_keys = [key for key in best_parameters if key.startswith('hybrid__modelForRxn')]
+    hyperparameters = {key: best_parameters[key] for key in hyperparameter_keys}
+    
+    #M Print the best score
+    print("Best Fitness Score:", best_score)
+        
+    #M Print best hyperparameters
+    print("Best Hyperparameters:")
+    for key, value in hyperparameters.items():
+        print(f"{key}: {value}")
+        
+    #M Print the best score up to date
+    print("Best Fitness Score Up To Date:", best_fitness_score_up_to_date )
+        
+    #M Print best hyperparameters up to date
+    print("Best Hyperparameters Up To Date:")
+    for key, value in best_hyperparameters_up_to_date.items():
+        print(f"{key}: {value}")
