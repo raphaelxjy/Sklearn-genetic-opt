@@ -444,6 +444,24 @@ class GASearchCV(BaseSearchCV):
 
         return [score], current_generation_params #M Added current_generation_params to return so that best hyperparameters for each generation can be printed out.
 
+    def aggregate_and_log_results(self, logging_results):
+        """
+        Collect the cv_results for each generation and records them into a logbook.
+        
+        Parameters
+        ----------
+        logging_results: CV_results of all individuals in a generation
+            Results that need to be recorded in the logbook
+        """
+        
+        current_generation_params = logging_results
+        
+        index = len(self.logbook.chapters["parameters"])
+        current_generation_params = {"index": index, **current_generation_params}
+
+        # Log the hyperparameters and the cv-score
+        self.logbook.record(parameters=current_generation_params)
+
     @if_delegate_has_method(delegate="estimator")
     def fit(self, X, y, callbacks=None):
         """
@@ -603,6 +621,8 @@ class GASearchCV(BaseSearchCV):
                 callbacks=self.callbacks,
                 verbose=self.verbose,
                 estimator=self,
+                n_jobs_ind_parallel=self.n_jobs_ind_parallel,
+                the_higher_metric_score_the_better=self.the_higher_metric_score_the_better
             )
 
         else:
